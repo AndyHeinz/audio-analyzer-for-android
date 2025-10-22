@@ -27,6 +27,8 @@ export interface RT60Config {
 }
 
 export class RT60Calculator {
+  private static readonly MAX_SAMPLES = 500000; // ~10s at 48kHz (safety limit)
+
   private sampleRate: number;
   private minRecordingTime: number = 2.0;  // seconds
   private maxRecordingTime: number = 10.0; // seconds
@@ -49,6 +51,9 @@ export class RT60Calculator {
   private status: string = 'Ready';
 
   constructor(config: RT60Config) {
+    if (config.sampleRate <= 0) {
+      throw new Error(`Sample rate must be positive, got: ${config.sampleRate}`);
+    }
     this.sampleRate = config.sampleRate;
     if (config.minRecordingTime !== undefined) {
       this.minRecordingTime = config.minRecordingTime;
@@ -71,7 +76,9 @@ export class RT60Calculator {
     this.reset();
     this.isRecording = true;
     this.impulseDetected = false;
+    this.maxAmplitude = 0;
     this.recordingStartTime = Date.now();
+    this.impulseDetectedTime = 0;
     this.status = 'Waiting for impulse...';
     console.log('[RT60] Measurement started. Waiting for impulse.');
   }
@@ -100,6 +107,8 @@ export class RT60Calculator {
     this.rt20 = 0;
     this.decayCurve = null;
     this.status = 'Ready';
+    this.recordingStartTime = 0;
+    this.impulseDetectedTime = 0;
   }
 
   /**
@@ -107,6 +116,10 @@ export class RT60Calculator {
    * @param samples Audio samples (normalized to -1.0 to 1.0)
    */
   public feedData(samples: Float32Array): void {
+    if (!samples || samples.length === 0) {
+      return;
+    }
+
     if (!this.isRecording) return;
 
     const currentTime = Date.now();
@@ -119,6 +132,13 @@ export class RT60Calculator {
     }
 
     for (let i = 0; i < samples.length; i++) {
+      // Check memory limit
+      if (this.audioSamples.length >= RT60Calculator.MAX_SAMPLES) {
+        console.warn(`[RT60] Maximum sample limit reached (${RT60Calculator.MAX_SAMPLES}), stopping measurement`);
+        this.stopMeasurement();
+        return;
+      }
+
       const normalizedSample = samples[i];
 
       // Impulse detection
@@ -253,6 +273,11 @@ export class RT60Calculator {
    * Calculate reverberation time from decay curve using linear regression
    */
   private calculateRTFromDecay(decay: number[], startDB: number, endDB: number): number {
+    if (!decay || decay.length === 0) {
+      console.warn('[RT60] Decay curve is null or empty');
+      return 0;
+    }
+
     // Find indices corresponding to start and end dB levels
     let startIdx = -1;
     let endIdx = -1;
@@ -261,14 +286,20 @@ export class RT60Calculator {
       if (startIdx === -1 && decay[i] <= startDB) {
         startIdx = i;
       }
-      if (decay[i] <= endDB) {
+      if (startIdx !== -1 && decay[i] <= endDB) {
         endIdx = i;
         break;
       }
     }
 
     if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
-      console.warn('[RT60] Could not find valid decay range');
+      console.warn(`[RT60] Could not find valid decay range (startIdx=${startIdx}, endIdx=${endIdx})`);
+      return 0;
+    }
+
+    // Safety check for array bounds
+    if (startIdx >= decay.length || endIdx >= decay.length) {
+      console.warn('[RT60] Index out of bounds in decay curve');
       return 0;
     }
 
@@ -321,7 +352,7 @@ export class RT60Calculator {
       rt60: this.rt60,
       rt30: this.rt30,
       rt20: this.rt20,
-      decayCurve: this.decayCurve,
+      decayCurve: this.decayCurve ? [...this.decayCurve] : null, // Return copy
       status: this.status,
       numSamples: this.audioSamples.length,
       duration: this.audioSamples.length / this.sampleRate
@@ -334,10 +365,20 @@ export class RT60Calculator {
 
   // Setters for configuration
   public setImpulseThreshold(threshold: number): void {
+    if (threshold < 0.0 || threshold > 1.0) {
+      throw new Error(`Impulse threshold must be between 0 and 1, got: ${threshold}`);
+    }
     this.impulseThreshold = Math.max(0.1, Math.min(1.0, threshold));
   }
 
   public setNoiseFloor(noiseFloor: number): void {
+    if (noiseFloor < 0.0 || noiseFloor > 1.0) {
+      throw new Error(`Noise floor must be between 0 and 1, got: ${noiseFloor}`);
+    }
     this.noiseFloor = Math.max(0.001, Math.min(0.1, noiseFloor));
+  }
+
+  public getSampleRate(): number {
+    return this.sampleRate;
   }
 }

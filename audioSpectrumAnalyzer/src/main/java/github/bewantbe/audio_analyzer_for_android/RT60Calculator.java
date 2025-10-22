@@ -34,6 +34,7 @@ import java.util.List;
  */
 public class RT60Calculator {
     private static final String TAG = "RT60Calculator";
+    private static final int MAX_SAMPLES = 500000; // ~10s at 48kHz (safety limit)
 
     // Configuration parameters
     private final int sampleRate;
@@ -41,25 +42,31 @@ public class RT60Calculator {
     private final double maxRecordingTime = 10.0; // Maximum recording time in seconds
 
     // Detection thresholds
-    private double impulseThreshold = 0.3;  // Threshold for impulse detection (0-1 scale)
-    private double noiseFloor = 0.01;       // Background noise level
+    private volatile double impulseThreshold = 0.3;  // Threshold for impulse detection (0-1 scale)
+    private volatile double noiseFloor = 0.01;       // Background noise level
 
-    // Measurement state
-    private boolean isRecording = false;
-    private boolean impulseDetected = false;
-    private List<Double> audioSamples = new ArrayList<>();
-    private long recordingStartTime = 0;
-    private long impulseDetectedTime = 0;
-    private double maxAmplitude = 0;
+    // Measurement state (synchronized access required)
+    private volatile boolean isRecording = false;
+    private volatile boolean impulseDetected = false;
+    private final List<Double> audioSamples = new ArrayList<>();
+    private volatile long recordingStartTime = 0;
+    private volatile long impulseDetectedTime = 0;
+    private volatile double maxAmplitude = 0;
 
-    // Results
-    private double rt60 = 0;
-    private double rt30 = 0;
-    private double rt20 = 0;
-    private double[] decayCurve = null;
-    private String status = "Ready";
+    // Results (synchronized access required)
+    private volatile double rt60 = 0;
+    private volatile double rt30 = 0;
+    private volatile double rt20 = 0;
+    private volatile double[] decayCurve = null;
+    private volatile String status = "Ready";
+
+    // Lock object for synchronization
+    private final Object lock = new Object();
 
     public RT60Calculator(int sampleRate) {
+        if (sampleRate <= 0) {
+            throw new IllegalArgumentException("Sample rate must be positive, got: " + sampleRate);
+        }
         this.sampleRate = sampleRate;
     }
 
@@ -67,23 +74,29 @@ public class RT60Calculator {
      * Start RT60 measurement
      */
     public void startMeasurement() {
-        reset();
-        isRecording = true;
-        impulseDetected = false;
-        recordingStartTime = System.currentTimeMillis();
-        status = "Waiting for impulse...";
-        Log.i(TAG, "RT60 measurement started. Waiting for impulse.");
+        synchronized (lock) {
+            reset();
+            isRecording = true;
+            impulseDetected = false;
+            maxAmplitude = 0;
+            recordingStartTime = System.currentTimeMillis();
+            impulseDetectedTime = 0;
+            status = "Waiting for impulse...";
+            Log.i(TAG, "RT60 measurement started. Waiting for impulse.");
+        }
     }
 
     /**
      * Stop RT60 measurement
      */
     public void stopMeasurement() {
-        isRecording = false;
-        if (impulseDetected && audioSamples.size() > 0) {
-            calculateRT60();
-        } else {
-            status = "No impulse detected";
+        synchronized (lock) {
+            isRecording = false;
+            if (impulseDetected && audioSamples.size() > 0) {
+                calculateRT60();
+            } else {
+                status = "No impulse detected";
+            }
         }
     }
 
@@ -91,66 +104,83 @@ public class RT60Calculator {
      * Reset all measurements
      */
     public void reset() {
-        audioSamples.clear();
-        impulseDetected = false;
-        maxAmplitude = 0;
-        rt60 = 0;
-        rt30 = 0;
-        rt20 = 0;
-        decayCurve = null;
-        status = "Ready";
+        synchronized (lock) {
+            audioSamples.clear();
+            impulseDetected = false;
+            maxAmplitude = 0;
+            rt60 = 0;
+            rt30 = 0;
+            rt20 = 0;
+            decayCurve = null;
+            status = "Ready";
+            recordingStartTime = 0;
+            impulseDetectedTime = 0;
+        }
     }
 
     /**
      * Feed audio samples to the RT60 calculator
-     * @param samples Audio samples (normalized to -1.0 to 1.0)
+     * @param samples Audio samples (16-bit PCM)
      */
     public void feedData(short[] samples) {
-        if (!isRecording) return;
-
-        long currentTime = System.currentTimeMillis();
-        double elapsedTime = (currentTime - recordingStartTime) / 1000.0;
-
-        // Check if maximum recording time exceeded
-        if (elapsedTime > maxRecordingTime) {
-            stopMeasurement();
+        if (samples == null || samples.length == 0) {
             return;
         }
 
-        for (short sample : samples) {
-            double normalizedSample = sample / 32768.0;
+        if (!isRecording) return;
 
-            // Impulse detection
-            if (!impulseDetected) {
-                double amplitude = Math.abs(normalizedSample);
-                if (amplitude > maxAmplitude) {
-                    maxAmplitude = amplitude;
-                }
+        synchronized (lock) {
+            long currentTime = System.currentTimeMillis();
+            double elapsedTime = (currentTime - recordingStartTime) / 1000.0;
 
-                // Detect impulse when amplitude exceeds threshold
-                if (amplitude > impulseThreshold) {
-                    impulseDetected = true;
-                    impulseDetectedTime = System.currentTimeMillis();
-                    audioSamples.clear(); // Start fresh from impulse
-                    status = "Recording decay...";
-                    Log.i(TAG, "Impulse detected! Recording decay...");
-                }
+            // Check if maximum recording time exceeded
+            if (elapsedTime > maxRecordingTime) {
+                stopMeasurement();
+                return;
             }
 
-            // Record samples after impulse detection
-            if (impulseDetected) {
-                audioSamples.add(normalizedSample);
-            }
-        }
-
-        // Auto-stop after minimum recording time if impulse was detected
-        if (impulseDetected) {
-            double timeSinceImpulse = (currentTime - impulseDetectedTime) / 1000.0;
-            if (timeSinceImpulse > minRecordingTime) {
-                // Check if signal has decayed sufficiently
-                double recentEnergy = calculateRecentEnergy(100);
-                if (recentEnergy < noiseFloor) {
+            for (short sample : samples) {
+                // Check memory limit
+                if (audioSamples.size() >= MAX_SAMPLES) {
+                    Log.w(TAG, "Maximum sample limit reached (" + MAX_SAMPLES + "), stopping measurement");
                     stopMeasurement();
+                    return;
+                }
+
+                double normalizedSample = sample / 32768.0;
+
+                // Impulse detection
+                if (!impulseDetected) {
+                    double amplitude = Math.abs(normalizedSample);
+                    if (amplitude > maxAmplitude) {
+                        maxAmplitude = amplitude;
+                    }
+
+                    // Detect impulse when amplitude exceeds threshold
+                    if (amplitude > impulseThreshold) {
+                        impulseDetected = true;
+                        impulseDetectedTime = System.currentTimeMillis();
+                        audioSamples.clear(); // Start fresh from impulse
+                        status = "Recording decay...";
+                        Log.i(TAG, "Impulse detected! Recording decay...");
+                    }
+                }
+
+                // Record samples after impulse detection
+                if (impulseDetected) {
+                    audioSamples.add(normalizedSample);
+                }
+            }
+
+            // Auto-stop after minimum recording time if impulse was detected
+            if (impulseDetected) {
+                double timeSinceImpulse = (currentTime - impulseDetectedTime) / 1000.0;
+                if (timeSinceImpulse > minRecordingTime) {
+                    // Check if signal has decayed sufficiently
+                    double recentEnergy = calculateRecentEnergy(100);
+                    if (recentEnergy < noiseFloor) {
+                        stopMeasurement();
+                    }
                 }
             }
         }
@@ -258,6 +288,11 @@ public class RT60Calculator {
      * @return Reverberation time in seconds
      */
     private double calculateRTFromDecay(double[] decay, double startDB, double endDB) {
+        if (decay == null || decay.length == 0) {
+            Log.w(TAG, "Decay curve is null or empty");
+            return 0;
+        }
+
         // Find indices corresponding to start and end dB levels
         int startIdx = -1;
         int endIdx = -1;
@@ -266,14 +301,20 @@ public class RT60Calculator {
             if (startIdx == -1 && decay[i] <= startDB) {
                 startIdx = i;
             }
-            if (decay[i] <= endDB) {
+            if (startIdx != -1 && decay[i] <= endDB) {
                 endIdx = i;
                 break;
             }
         }
 
         if (startIdx == -1 || endIdx == -1 || endIdx <= startIdx) {
-            Log.w(TAG, "Could not find valid decay range");
+            Log.w(TAG, "Could not find valid decay range (startIdx=" + startIdx + ", endIdx=" + endIdx + ")");
+            return 0;
+        }
+
+        // Safety check for array bounds
+        if (startIdx >= decay.length || endIdx >= decay.length) {
+            Log.w(TAG, "Index out of bounds in decay curve");
             return 0;
         }
 
@@ -334,7 +375,10 @@ public class RT60Calculator {
     }
 
     public double[] getDecayCurve() {
-        return decayCurve;
+        synchronized (lock) {
+            // Return a copy to prevent external modification
+            return decayCurve != null ? decayCurve.clone() : null;
+        }
     }
 
     public String getStatus() {
@@ -342,19 +386,33 @@ public class RT60Calculator {
     }
 
     public int getNumSamples() {
-        return audioSamples.size();
+        synchronized (lock) {
+            return audioSamples.size();
+        }
     }
 
     public double getRecordingDuration() {
-        return (double)audioSamples.size() / sampleRate;
+        synchronized (lock) {
+            return (double)audioSamples.size() / sampleRate;
+        }
     }
 
     // Setters for configuration
     public void setImpulseThreshold(double threshold) {
+        if (threshold < 0.0 || threshold > 1.0) {
+            throw new IllegalArgumentException("Impulse threshold must be between 0 and 1, got: " + threshold);
+        }
         this.impulseThreshold = Math.max(0.1, Math.min(1.0, threshold));
     }
 
     public void setNoiseFloor(double noiseFloor) {
+        if (noiseFloor < 0.0 || noiseFloor > 1.0) {
+            throw new IllegalArgumentException("Noise floor must be between 0 and 1, got: " + noiseFloor);
+        }
         this.noiseFloor = Math.max(0.001, Math.min(0.1, noiseFloor));
+    }
+
+    public int getSampleRate() {
+        return sampleRate;
     }
 }
