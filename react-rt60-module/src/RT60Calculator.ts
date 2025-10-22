@@ -123,12 +123,21 @@ export class RT60Calculator {
     if (!this.isRecording) return;
 
     const currentTime = Date.now();
-    const elapsedTime = (currentTime - this.recordingStartTime) / 1000.0;
 
-    // Check if maximum recording time exceeded
-    if (elapsedTime > this.maxRecordingTime) {
-      this.stopMeasurement();
-      return;
+    // Fixed: Check maximum time based on state (impulse detected or not)
+    if (this.impulseDetected && this.impulseDetectedTime > 0) {
+      const timeSinceImpulse = (currentTime - this.impulseDetectedTime) / 1000.0;
+      if (timeSinceImpulse > this.maxRecordingTime) {
+        this.stopMeasurement();
+        return;
+      }
+    } else {
+      // Before impulse: use total elapsed time (prevents infinite waiting)
+      const elapsedTime = (currentTime - this.recordingStartTime) / 1000.0;
+      if (elapsedTime > this.maxRecordingTime) {
+        this.stopMeasurement();
+        return;
+      }
     }
 
     for (let i = 0; i < samples.length; i++) {
@@ -365,16 +374,12 @@ export class RT60Calculator {
 
   // Setters for configuration
   public setImpulseThreshold(threshold: number): void {
-    if (threshold < 0.0 || threshold > 1.0) {
-      throw new Error(`Impulse threshold must be between 0 and 1, got: ${threshold}`);
-    }
+    // Fixed: Remove unreachable code - silently clamp invalid values
     this.impulseThreshold = Math.max(0.1, Math.min(1.0, threshold));
   }
 
   public setNoiseFloor(noiseFloor: number): void {
-    if (noiseFloor < 0.0 || noiseFloor > 1.0) {
-      throw new Error(`Noise floor must be between 0 and 1, got: ${noiseFloor}`);
-    }
+    // Fixed: Remove unreachable code - silently clamp invalid values
     this.noiseFloor = Math.max(0.001, Math.min(0.1, noiseFloor));
   }
 

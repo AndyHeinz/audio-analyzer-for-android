@@ -104,7 +104,7 @@ public final class RT60Calculator {
         lock.lock()
         defer { lock.unlock() }
 
-        reset()
+        resetInternal()
         isRecording = true
         impulseDetected = false
         maxAmplitude = 0
@@ -120,6 +120,21 @@ public final class RT60Calculator {
         lock.lock()
         defer { lock.unlock() }
 
+        stopMeasurementInternal()
+    }
+
+    /// Reset all measurements
+    public func reset() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        resetInternal()
+    }
+
+    // MARK: - Internal Methods (assume caller holds lock)
+
+    /// Internal stop measurement (no lock - caller must hold lock)
+    private func stopMeasurementInternal() {
         isRecording = false
         if impulseDetected && !audioSamples.isEmpty {
             calculateRT60()
@@ -128,11 +143,8 @@ public final class RT60Calculator {
         }
     }
 
-    /// Reset all measurements
-    public func reset() {
-        lock.lock()
-        defer { lock.unlock() }
-
+    /// Internal reset (no lock - caller must hold lock)
+    private func resetInternal() {
         audioSamples.removeAll()
         impulseDetected = false
         maxAmplitude = 0
@@ -155,11 +167,18 @@ public final class RT60Calculator {
 
         guard isRecording else { return }
 
-        // Check maximum recording time
-        if let startTime = recordingStartTime {
+        // Fixed: Check maximum time based on state (impulse detected or not)
+        if impulseDetected, let impulseTime = impulseDetectedTime {
+            let timeSinceImpulse = Date().timeIntervalSince(impulseTime)
+            if timeSinceImpulse > config.maxRecordingTime {
+                stopMeasurementInternal()  // Fixed: Use internal version (no lock)
+                return
+            }
+        } else if let startTime = recordingStartTime {
+            // Before impulse: use total elapsed time (prevents infinite waiting)
             let elapsedTime = Date().timeIntervalSince(startTime)
             if elapsedTime > config.maxRecordingTime {
-                stopMeasurement()
+                stopMeasurementInternal()  // Fixed: Use internal version (no lock)
                 return
             }
         }
@@ -168,7 +187,7 @@ public final class RT60Calculator {
             // Memory safety check
             if audioSamples.count >= Self.maxSamples {
                 print("[RT60] Maximum sample limit reached (\(Self.maxSamples)), stopping measurement")
-                stopMeasurement()
+                stopMeasurementInternal()  // Fixed: Use internal version (no lock)
                 return
             }
 
@@ -204,7 +223,7 @@ public final class RT60Calculator {
                 // Check if signal has decayed sufficiently
                 let recentEnergy = calculateRecentEnergy(numSamples: 100)
                 if recentEnergy < config.noiseFloor {
-                    stopMeasurement()
+                    stopMeasurementInternal()  // Fixed: Use internal version (no lock)
                 }
             }
         }

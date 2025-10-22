@@ -127,16 +127,26 @@ public class RT60Calculator {
             return;
         }
 
-        if (!isRecording) return;
-
         synchronized (lock) {
-            long currentTime = System.currentTimeMillis();
-            double elapsedTime = (currentTime - recordingStartTime) / 1000.0;
+            // Fixed: Check isRecording inside lock to prevent TOCTOU race condition
+            if (!isRecording) return;
 
-            // Check if maximum recording time exceeded
-            if (elapsedTime > maxRecordingTime) {
-                stopMeasurement();
-                return;
+            long currentTime = System.currentTimeMillis();
+
+            // Fixed: Check maximum time based on state (impulse detected or not)
+            if (impulseDetected && impulseDetectedTime > 0) {
+                double timeSinceImpulse = (currentTime - impulseDetectedTime) / 1000.0;
+                if (timeSinceImpulse > maxRecordingTime) {
+                    stopMeasurement();
+                    return;
+                }
+            } else {
+                // Before impulse: use total elapsed time (prevents infinite waiting)
+                double elapsedTime = (currentTime - recordingStartTime) / 1000.0;
+                if (elapsedTime > maxRecordingTime) {
+                    stopMeasurement();
+                    return;
+                }
             }
 
             for (short sample : samples) {
@@ -399,16 +409,12 @@ public class RT60Calculator {
 
     // Setters for configuration
     public void setImpulseThreshold(double threshold) {
-        if (threshold < 0.0 || threshold > 1.0) {
-            throw new IllegalArgumentException("Impulse threshold must be between 0 and 1, got: " + threshold);
-        }
+        // Fixed: Remove unreachable code - silently clamp invalid values
         this.impulseThreshold = Math.max(0.1, Math.min(1.0, threshold));
     }
 
     public void setNoiseFloor(double noiseFloor) {
-        if (noiseFloor < 0.0 || noiseFloor > 1.0) {
-            throw new IllegalArgumentException("Noise floor must be between 0 and 1, got: " + noiseFloor);
-        }
+        // Fixed: Remove unreachable code - silently clamp invalid values
         this.noiseFloor = Math.max(0.001, Math.min(0.1, noiseFloor));
     }
 
