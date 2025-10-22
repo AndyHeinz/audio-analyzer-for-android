@@ -49,6 +49,7 @@ public class RT60Calculator {
     private boolean impulseDetected = false;
     private List<Double> audioSamples = new ArrayList<>();
     private long recordingStartTime = 0;
+    private long impulseDetectedTime = 0;
     private double maxAmplitude = 0;
 
     // Results
@@ -129,6 +130,7 @@ public class RT60Calculator {
                 // Detect impulse when amplitude exceeds threshold
                 if (amplitude > impulseThreshold) {
                     impulseDetected = true;
+                    impulseDetectedTime = System.currentTimeMillis();
                     audioSamples.clear(); // Start fresh from impulse
                     status = "Recording decay...";
                     Log.i(TAG, "Impulse detected! Recording decay...");
@@ -142,11 +144,14 @@ public class RT60Calculator {
         }
 
         // Auto-stop after minimum recording time if impulse was detected
-        if (impulseDetected && elapsedTime > minRecordingTime) {
-            // Check if signal has decayed sufficiently
-            double recentEnergy = calculateRecentEnergy(100);
-            if (recentEnergy < noiseFloor) {
-                stopMeasurement();
+        if (impulseDetected) {
+            double timeSinceImpulse = (currentTime - impulseDetectedTime) / 1000.0;
+            if (timeSinceImpulse > minRecordingTime) {
+                // Check if signal has decayed sufficiently
+                double recentEnergy = calculateRecentEnergy(100);
+                if (recentEnergy < noiseFloor) {
+                    stopMeasurement();
+                }
             }
         }
     }
@@ -155,6 +160,10 @@ public class RT60Calculator {
      * Calculate energy of the most recent samples
      */
     private double calculateRecentEnergy(int numSamples) {
+        if (audioSamples.isEmpty()) {
+            return 0.0;
+        }
+
         if (audioSamples.size() < numSamples) {
             numSamples = audioSamples.size();
         }
@@ -211,21 +220,34 @@ public class RT60Calculator {
             }
         }
 
-        // Calculate RT60, RT30, RT20 by linear regression
-        rt60 = calculateRTFromDecay(decayCurve, -5, -25); // Use -5 to -25 dB range for RT20
-        rt30 = calculateRTFromDecay(decayCurve, -5, -35); // Use -5 to -35 dB range for RT30
-        rt20 = rt60; // RT20 is already calculated above
+        // Calculate RT20, RT30 by linear regression and extrapolate to RT60
+        double rt20_measured = calculateRTFromDecay(decayCurve, -5, -25); // Use -5 to -25 dB range (20 dB range)
+        double rt30_measured = calculateRTFromDecay(decayCurve, -5, -35); // Use -5 to -35 dB range (30 dB range)
 
-        // Extrapolate to 60 dB if we used a smaller range
-        rt60 = rt20 * 3.0; // RT60 = RT20 * 3
-        rt30 = rt30 * 2.0; // RT60 from RT30 = RT30 * 2
+        // Store RT20 and RT30 values (not extrapolated)
+        rt20 = rt20_measured;
+        rt30 = rt30_measured;
 
-        // Average RT60 from both methods
-        rt60 = (rt60 + rt30) / 2.0;
+        // Extrapolate to 60 dB
+        double rt60_from_rt20 = rt20_measured * 3.0; // RT60 = RT20 * 3 (20dB * 3 = 60dB)
+        double rt60_from_rt30 = rt30_measured * 2.0; // RT60 = RT30 * 2 (30dB * 2 = 60dB)
+
+        // Average RT60 from both methods for more accurate result
+        if (rt60_from_rt20 > 0 && rt60_from_rt30 > 0) {
+            rt60 = (rt60_from_rt20 + rt60_from_rt30) / 2.0;
+        } else if (rt60_from_rt20 > 0) {
+            rt60 = rt60_from_rt20;
+        } else if (rt60_from_rt30 > 0) {
+            rt60 = rt60_from_rt30;
+        } else {
+            rt60 = 0;
+            status = "Calculation failed";
+            return;
+        }
 
         status = String.format("RT60: %.2f s", rt60);
-        Log.i(TAG, String.format("RT60 calculated: RT20=%.2fs, RT30=%.2fs, RT60=%.2fs",
-                                  rt20, rt30/2.0, rt60));
+        Log.i(TAG, String.format("RT60 calculated: RT20=%.2fs, RT30=%.2fs, RT60=%.2fs (from RT20: %.2fs, from RT30: %.2fs)",
+                                  rt20, rt30, rt60, rt60_from_rt20, rt60_from_rt30));
     }
 
     /**
@@ -270,7 +292,13 @@ public class RT60Calculator {
         }
 
         // Calculate slope (dB/second)
-        double slope = (numPoints * sumXY - sumX * sumY) / (numPoints * sumX2 - sumX * sumX);
+        double denominator = numPoints * sumX2 - sumX * sumX;
+        if (Math.abs(denominator) < 1e-10) {
+            Log.w(TAG, "Division by zero in linear regression");
+            return 0;
+        }
+
+        double slope = (numPoints * sumXY - sumX * sumY) / denominator;
 
         if (slope >= 0) {
             Log.w(TAG, "Positive slope detected - invalid decay");
@@ -298,7 +326,7 @@ public class RT60Calculator {
     }
 
     public double getRT30() {
-        return rt30 / 2.0; // Return actual RT30
+        return rt30; // Return actual RT30 (not divided by 2)
     }
 
     public double getRT20() {
