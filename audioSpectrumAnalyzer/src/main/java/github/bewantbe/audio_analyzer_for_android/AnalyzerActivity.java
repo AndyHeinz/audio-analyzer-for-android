@@ -273,9 +273,25 @@ public class AnalyzerActivity extends Activity
                 return true;
             case R.id.menu_calibration:
                 selectFile(REQUEST_CALIB_LOAD);
+                return true;
+            case R.id.menu_rt60:
+                switchToRT60Mode();
+                return true;
             default:
                 return super.onOptionsItemSelected(item);
         }
+    }
+
+    // Switch to RT60 measurement mode
+    private void switchToRT60Mode() {
+        Log.i(TAG, "Switching to RT60 mode");
+        analyzerViews.graphView.switch2RT60();
+        if (samplingThread != null) {
+            samplingThread.resetRT60Measurement();
+            samplingThread.startRT60Measurement();
+        }
+        analyzerViews.graphView.invalidate();
+        Toast.makeText(this, "RT60 Mode: Make a loud impulse (clap, balloon pop, etc.)", Toast.LENGTH_LONG).show();
     }
 
     // Popup menu click listener

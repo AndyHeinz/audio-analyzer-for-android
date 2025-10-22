@@ -44,6 +44,7 @@ class SamplingLoop extends Thread {
     private volatile boolean isPaused1 = false;
     private STFT stft;   // use with care
     private final AnalyzerParameters analyzerParam;
+    private RT60Calculator rt60Calculator;  // RT60 measurement
 
     private SineGenerator sineGen1;
     private SineGenerator sineGen2;
@@ -226,6 +227,9 @@ class SamplingLoop extends Thread {
             spectrumDBcopy = new double[analyzerParam.fftLen/2+1];
         }
 
+        // Initialize RT60 calculator
+        rt60Calculator = new RT60Calculator(analyzerParam.sampleRate);
+
         RecorderMonitor recorderMonitor = new RecorderMonitor(analyzerParam.sampleRate, bufferSampleSize, "SamplingLoop::run()");
         recorderMonitor.start();
 
@@ -277,6 +281,21 @@ class SamplingLoop extends Thread {
                 continue;
             }
 
+            // Feed data to RT60 calculator if in RT60 mode
+            if (activity.graphView.getShowMode() == AnalyzerGraphic.PlotMode.RT60) {
+                rt60Calculator.feedData(audioSamples);
+                // Update RT60 display
+                activity.graphView.saveRT60Data(
+                    rt60Calculator.getDecayCurve(),
+                    analyzerParam.sampleRate,
+                    rt60Calculator.getRT60(),
+                    rt60Calculator.getRT30(),
+                    rt60Calculator.getRT20(),
+                    rt60Calculator.getStatus()
+                );
+                activity.graphView.invalidate();
+            }
+
             stft.feedData(audioSamples, numOfReadShort);
 
             // If there is new spectrum data, do plot
@@ -324,5 +343,27 @@ class SamplingLoop extends Thread {
     void finish() {
         isRunning = false;
         interrupt();
+    }
+
+    // RT60 measurement control
+    void startRT60Measurement() {
+        if (rt60Calculator != null) {
+            rt60Calculator.startMeasurement();
+            Log.i(TAG, "RT60 measurement started");
+        }
+    }
+
+    void stopRT60Measurement() {
+        if (rt60Calculator != null) {
+            rt60Calculator.stopMeasurement();
+            Log.i(TAG, "RT60 measurement stopped");
+        }
+    }
+
+    void resetRT60Measurement() {
+        if (rt60Calculator != null) {
+            rt60Calculator.reset();
+            Log.i(TAG, "RT60 measurement reset");
+        }
     }
 }

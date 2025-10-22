@@ -58,11 +58,20 @@ public class AnalyzerGraphic extends View {
 
     SpectrumPlot    spectrumPlot;
     SpectrogramPlot spectrogramPlot;
+    RT60Plot        rt60Plot;
 
     private PlotMode showMode = PlotMode.SPECTRUM;
 
+    // RT60 measurement data
+    private double[] rt60DecayCurve = null;
+    private double rt60Value = 0;
+    private double rt30Value = 0;
+    private double rt20Value = 0;
+    private String rt60Status = "Ready";
+    private int rt60SampleRate = 16000;
+
     enum PlotMode {  // java's enum type is inconvenient
-        SPECTRUM(0), SPECTROGRAM(1);
+        SPECTRUM(0), SPECTROGRAM(1), RT60(2);
 
         private final int value;
         PlotMode(int value) { this.value = value; }
@@ -98,9 +107,11 @@ public class AnalyzerGraphic extends View {
         // Demo of full initialization
         spectrumPlot    = new SpectrumPlot(context);
         spectrogramPlot = new SpectrogramPlot(context);
+        rt60Plot        = new RT60Plot(context);
 
         spectrumPlot   .setCanvas(canvasWidth, canvasHeight, null);
         spectrogramPlot.setCanvas(canvasWidth, canvasHeight, null);
+        rt60Plot       .setCanvas(canvasWidth, canvasHeight, null);
 
         spectrumPlot   .setZooms(xZoom, xShift, yZoom, yShift);
         spectrogramPlot.setZooms(xZoom, xShift, yZoom, yShift);
@@ -233,6 +244,20 @@ public class AnalyzerGraphic extends View {
         spectrogramPlot.spectrogramBMP.updateAxis(spectrogramPlot.axisFreq);
         spectrogramPlot.prepare();
         showMode = PlotMode.SPECTROGRAM;
+    }
+
+    // Switch to RT60 measurement mode
+    public void switch2RT60() {
+        if (showMode == PlotMode.RT60) {
+            return;
+        }
+        Log.v(TAG, "switch2RT60()");
+        showMode = PlotMode.RT60;
+        // Reset zoom/shift for RT60 view
+        xZoom  = 1f;
+        xShift = 0f;
+        yZoom  = 1f;
+        yShift = 0f;
     }
 
     double[] setViewRange(double[] _ranges, double[] rangesDefault) {
@@ -368,8 +393,10 @@ public class AnalyzerGraphic extends View {
         if (showMode == PlotMode.SPECTRUM) {
             spectrumPlot.addCalibCurve(analyzerParamCache.micGainDB, null, analyzerParamCache.calibName);
             spectrumPlot.drawSpectrumPlot(c, savedDBSpectrum);
-        } else {
+        } else if (showMode == PlotMode.SPECTROGRAM) {
             spectrogramPlot.drawSpectrogramPlot(c);
+        } else if (showMode == PlotMode.RT60) {
+            rt60Plot.draw(c, rt60DecayCurve, rt60SampleRate, rt60Value, rt30Value, rt20Value, rt60Status);
         }
         isBusy = false;
     }
@@ -387,6 +414,17 @@ public class AnalyzerGraphic extends View {
         if (showMode == PlotMode.SPECTROGRAM) {
             spectrogramPlot.saveRowSpectrumAsColor(savedDBSpectrum);
         }
+    }
+
+    // RT60 data interface
+    // Will be called in another thread (SamplingLoop)
+    public void saveRT60Data(double[] decayCurve, int sampleRate, double rt60, double rt30, double rt20, String status) {
+        this.rt60DecayCurve = decayCurve;
+        this.rt60SampleRate = sampleRate;
+        this.rt60Value = rt60;
+        this.rt30Value = rt30;
+        this.rt20Value = rt20;
+        this.rt60Status = status;
     }
 
     void setSpectrumDBLowerBound(double b) {
@@ -634,6 +672,7 @@ public class AnalyzerGraphic extends View {
         this.canvasHeight = h;
         spectrumPlot   .setCanvas(w, h, null);
         spectrogramPlot.setCanvas(w, h, null);
+        rt60Plot       .setCanvas(w, h, null);
         if (h > 0 && readyCallback != null) {
             readyCallback.ready();
         }

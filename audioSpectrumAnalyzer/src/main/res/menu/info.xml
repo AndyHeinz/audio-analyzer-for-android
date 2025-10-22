@@ -41,4 +41,12 @@
         android:title="Load calibration"
         android:titleCondensed="calib"/>
 
+    <item
+        android:id="@+id/menu_rt60"
+        android:enabled="true"
+        android:icon="@android:drawable/ic_menu_view"
+        android:menuCategory="container"
+        android:title="RT60 Measurement"
+        android:titleCondensed="RT60"/>
+
 </menu>
