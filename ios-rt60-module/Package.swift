@@ -12,8 +12,8 @@ import PackageDescription
 let package = Package(
     name: "RT60",
     platforms: [
-        .iOS(.v13),
-        .macOS(.v10_15)
+        .iOS(.v16),      // Updated for RoomPlan support
+        .macOS(.v13)     // Updated for RoomPlan support
     ],
     products: [
         .library(
@@ -25,7 +25,10 @@ let package = Package(
         .target(
             name: "RT60",
             dependencies: [],
-            path: "Sources/RT60"
+            path: "Sources/RT60",
+            linkerSettings: [
+                .linkedFramework("RoomPlan", .when(platforms: [.iOS, .macOS]))
+            ]
         ),
         .testTarget(
             name: "RT60Tests",

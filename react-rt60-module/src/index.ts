@@ -19,3 +19,11 @@ export type { RT60VisualizerProps } from './RT60Visualizer';
 
 export { RT60Component } from './RT60Component';
 export type { RT60ComponentProps } from './RT60Component';
+
+export { AcousticRoomAnalyzer, AcousticAnalyzer } from './AcousticRoomAnalyzer';
+export type {
+  RoomDimensions,
+  AcousticAnalysis,
+  AcousticRoomAnalyzerProps,
+} from './AcousticRoomAnalyzer';
+export { RoomType, AcousticQuality } from './AcousticRoomAnalyzer';
