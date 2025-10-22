@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.roomscanner">
+
+    <!-- Camera permission for ARCore -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- ARCore features (optional - doesn't require ARCore to function) -->
+    <uses-feature
+        android:name="android.hardware.camera.ar"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="true" />
+
+    <application>
+        <!-- ARCore metadata (optional) -->
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="optional" />
+    </application>
+
+</manifest>
