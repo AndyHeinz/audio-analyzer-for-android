@@ -110,8 +110,41 @@ export function useRoomScanner(options: UseRoomScannerOptions = {}): UseRoomScan
   const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'unknown';
   const hasLiDAR = platform === 'ios'; // Only iOS devices with LiDAR support RoomPlan
 
+  /**
+   * Check if room scanning is supported
+   * FIXED CRITICAL BUG: Moved before useEffect to avoid "used before declaration" error
+   */
+  const checkSupport = useCallback(async () => {
+    try {
+      let supported = false;
+      let accuracy = 0;
+      let scanDuration = 0;
+
+      if (platform === 'ios' && RoomPlanModule) {
+        supported = await RoomPlanModule.isSupported();
+        accuracy = 0.95; // LiDAR accuracy
+        scanDuration = 45; // typical iOS scan
+      } else if (platform === 'android' && ARCoreModule) {
+        supported = await ARCoreModule.isSupported();
+        accuracy = 0.75; // Camera-based accuracy
+        scanDuration = 90; // typical Android scan
+      }
+
+      setIsSupported(supported);
+      setCapabilities({
+        isSupported: supported,
+        platform,
+        hasLiDAR,
+        expectedAccuracy: accuracy,
+        typicalScanDuration: scanDuration
+      });
+    } catch (err) {
+      console.error('[useRoomScanner] Error checking support:', err);
+      setIsSupported(false);
+    }
+  }, [platform, hasLiDAR]);
+
   // Check if supported on mount
-  // FIXED: Added checkSupport to dependency array to satisfy exhaustive-deps rule
   useEffect(() => {
     checkSupport();
   }, [checkSupport]);
@@ -145,39 +178,6 @@ export function useRoomScanner(options: UseRoomScannerOptions = {}): UseRoomScan
       errorSub.remove();
     };
   }, [onScanComplete, onError, onProgress]);
-
-  /**
-   * Check if room scanning is supported
-   */
-  const checkSupport = useCallback(async () => {
-    try {
-      let supported = false;
-      let accuracy = 0;
-      let scanDuration = 0;
-
-      if (platform === 'ios' && RoomPlanModule) {
-        supported = await RoomPlanModule.isSupported();
-        accuracy = 0.95; // LiDAR accuracy
-        scanDuration = 45; // typical iOS scan
-      } else if (platform === 'android' && ARCoreModule) {
-        supported = await ARCoreModule.isSupported();
-        accuracy = 0.75; // Camera-based accuracy
-        scanDuration = 90; // typical Android scan
-      }
-
-      setIsSupported(supported);
-      setCapabilities({
-        isSupported: supported,
-        platform,
-        hasLiDAR,
-        expectedAccuracy: accuracy,
-        typicalScanDuration: scanDuration
-      });
-    } catch (err) {
-      console.error('[useRoomScanner] Error checking support:', err);
-      setIsSupported(false);
-    }
-  }, [platform, hasLiDAR]);
 
   /**
    * Start room scanning

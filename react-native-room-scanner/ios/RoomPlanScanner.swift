@@ -102,6 +102,23 @@ class RoomPlanModule: RCTEventEmitter {
         print("[RoomPlan] Scan stopped")
     }
 
+    // MARK: - Lifecycle
+
+    // FIXED CRITICAL BUG: Resource cleanup on deallocation
+    deinit {
+        print("[RoomPlan] Module deallocating, cleaning up resources")
+        captureSession?.stop()
+        captureSession = nil
+        captureDelegate = nil
+
+        // Reject any pending promises to prevent memory leaks
+        if let reject = pendingReject {
+            reject("MODULE_DEALLOCATED", "RoomPlan module was deallocated during scan", nil)
+            pendingResolve = nil
+            pendingReject = nil
+        }
+    }
+
     // MARK: - Private Methods
 
     // FIXED BUG #2: Updated to use instance promise blocks
@@ -253,7 +270,8 @@ class RoomPlanModule: RCTEventEmitter {
             return (0, 0, 0)
         }
 
-        // Find bounding box
+        // FIXED CRITICAL BUG: Transform wall corner points to world space
+        // Old code assumed all walls axis-aligned, causing errors for non-rectangular rooms
         var minX: Float = .infinity
         var maxX: Float = -.infinity
         var minZ: Float = .infinity
@@ -261,13 +279,26 @@ class RoomPlanModule: RCTEventEmitter {
         var maxHeight: Float = 0
 
         for wall in walls {
-            let position = wall.transform.columns.3
             let halfWidth = wall.dimensions.x / 2.0
+            let halfDepth = wall.dimensions.z / 2.0
 
-            minX = min(minX, position.x - halfWidth)
-            maxX = max(maxX, position.x + halfWidth)
-            minZ = min(minZ, position.z - halfWidth)
-            maxZ = max(maxZ, position.z + halfWidth)
+            // Four corner points in local space
+            let corners = [
+                SIMD4<Float>(-halfWidth, 0, -halfDepth, 1),
+                SIMD4<Float>(halfWidth, 0, -halfDepth, 1),
+                SIMD4<Float>(-halfWidth, 0, halfDepth, 1),
+                SIMD4<Float>(halfWidth, 0, halfDepth, 1)
+            ]
+
+            // Transform each corner to world space
+            for corner in corners {
+                let worldCorner = wall.transform * corner
+                minX = min(minX, worldCorner.x)
+                maxX = max(maxX, worldCorner.x)
+                minZ = min(minZ, worldCorner.z)
+                maxZ = max(maxZ, worldCorner.z)
+            }
+
             maxHeight = max(maxHeight, wall.dimensions.y)
         }
 

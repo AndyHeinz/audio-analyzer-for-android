@@ -18,8 +18,11 @@
 
 package com.roomscanner
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.*
 import com.google.ar.core.*
 import com.google.ar.core.exceptions.*
@@ -166,6 +169,19 @@ class ARCoreRoomScanner(private val context: Context) {
      * floor and walls. For production, manual input is more reliable.
      */
     private fun startARCoreScan(promise: Promise) {
+        // FIXED CRITICAL BUG #2: Check if already scanning (race condition)
+        if (isScanning) {
+            promise.reject("SCAN_IN_PROGRESS", "Room scan already in progress", null)
+            return
+        }
+
+        // FIXED CRITICAL BUG #1: Check camera permission before creating ARCore session
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+            != PackageManager.PERMISSION_GRANTED) {
+            promise.reject("PERMISSION_DENIED", "Camera permission required for ARCore scanning", null)
+            return
+        }
+
         try {
             // Create ARCore session
             arSession = Session(context).apply {
@@ -200,6 +216,10 @@ class ARCoreRoomScanner(private val context: Context) {
                         delay(100) // Update at 10Hz
                     } catch (e: CameraNotAvailableException) {
                         Log.e(TAG, "Camera not available", e)
+                        break
+                    } catch (e: Exception) {
+                        // FIXED HIGH PRIORITY BUG: Catch all ARCore exceptions
+                        Log.e(TAG, "ARCore update error: ${e.message}", e)
                         break
                     }
                 }
@@ -250,8 +270,9 @@ class ARCoreRoomScanner(private val context: Context) {
         val walls = Arguments.createArray()
         wallPlanes.forEachIndexed { index, plane ->
             val pose = plane.centerPose
-            val x = pose.tx().toDouble()
-            val z = pose.tz().toDouble()
+            // FIXED CRITICAL BUG #4: Use .translation array instead of deprecated tx()/tz()
+            val x = pose.translation[0].toDouble()  // X
+            val z = pose.translation[2].toDouble()  // Z (not Y which is height)
             val halfExtent = (plane.extentX / 2).toDouble()
 
             walls.pushMap(createWall("wall_$index",
@@ -313,6 +334,7 @@ class ARCoreRoomScanner(private val context: Context) {
      */
     fun cleanup() {
         stopARCore()
+        detectedPlanes.clear()  // FIXED HIGH PRIORITY BUG: Clear native plane references
         scanScope.cancel()
         Log.i(TAG, "ARCoreRoomScanner cleanup complete")
     }
