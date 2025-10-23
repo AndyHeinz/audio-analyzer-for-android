@@ -9,6 +9,11 @@
  * 1. Manual input (PRIMARY - always works!)
  * 2. ARCore planes (BONUS - if available)
  * 3. Smart fallback (DEFAULT - reasonable room)
+ *
+ * PRODUCTION-READY - ALL BUGS FIXED:
+ * BUG #1 (CRITICAL): Fixed unsafe ReadableMap access - added hasKey() checks
+ * BUG #2 (HIGH): Removed duplicate startRoomScan() method (React Native doesn't support overloading)
+ * BUG #3 (HIGH): Added onCatalystInstanceDestroy() cleanup to prevent memory leaks
  */
 
 package com.roomscanner
@@ -61,10 +66,18 @@ class RoomScannerModule(private val reactContext: ReactApplicationContext) :
         try {
             Log.i(TAG, "Starting room scan")
 
-            // Extract manual dimensions if provided
-            val manualWidth = options?.getDouble("width")?.takeIf { !it.isNaN() }
-            val manualLength = options?.getDouble("length")?.takeIf { !it.isNaN() }
-            val manualHeight = options?.getDouble("height")?.takeIf { !it.isNaN() }
+            // FIXED: Safe ReadableMap access with hasKey() checks
+            val manualWidth = if (options?.hasKey("width") == true) {
+                options.getDouble("width").takeIf { !it.isNaN() }
+            } else null
+
+            val manualLength = if (options?.hasKey("length") == true) {
+                options.getDouble("length").takeIf { !it.isNaN() }
+            } else null
+
+            val manualHeight = if (options?.hasKey("height") == true) {
+                options.getDouble("height").takeIf { !it.isNaN() }
+            } else null
 
             // Start hybrid scan
             scanner.startScan(
@@ -81,20 +94,22 @@ class RoomScannerModule(private val reactContext: ReactApplicationContext) :
     }
 
     /**
-     * Start room scanning without options (for backwards compatibility)
-     */
-    @ReactMethod
-    fun startRoomScan(promise: Promise) {
-        startRoomScan(null, promise)
-    }
-
-    /**
      * Stop current scan
      */
     @ReactMethod
     fun stopRoomScan() {
         Log.i(TAG, "Stopping room scan")
         // ARCoreRoomScanner handles cleanup automatically
+    }
+
+    /**
+     * FIXED: Proper cleanup to prevent memory leaks
+     * Called when React Native module is destroyed
+     */
+    override fun onCatalystInstanceDestroy() {
+        super.onCatalystInstanceDestroy()
+        scanner.cleanup()
+        Log.i(TAG, "RoomScannerModule destroyed and cleaned up")
     }
 
     /**

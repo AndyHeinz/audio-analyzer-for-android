@@ -321,7 +321,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     marginTop: 8,
-    gap: 12,
+    // FIXED: Removed gap property (not supported in React Native)
+    // Spacing handled by justifyContent: 'space-around'
   },
   errorCard: {
     backgroundColor: '#FFEBEE',

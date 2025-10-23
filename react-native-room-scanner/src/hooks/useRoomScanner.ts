@@ -111,9 +111,10 @@ export function useRoomScanner(options: UseRoomScannerOptions = {}): UseRoomScan
   const hasLiDAR = platform === 'ios'; // Only iOS devices with LiDAR support RoomPlan
 
   // Check if supported on mount
+  // FIXED: Added checkSupport to dependency array to satisfy exhaustive-deps rule
   useEffect(() => {
     checkSupport();
-  }, []);
+  }, [checkSupport]);
 
   // Listen to progress events (iOS only)
   useEffect(() => {

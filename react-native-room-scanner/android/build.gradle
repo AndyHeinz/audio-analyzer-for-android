@@ -50,6 +50,10 @@ dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
     implementation 'com.facebook.react:react-native:+'
 
-    // ARCore (for future implementation)
+    // ARCore
     implementation 'com.google.ar:core:1.38.0'
+
+    // Coroutines (REQUIRED for ARCore scanning)
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 }
